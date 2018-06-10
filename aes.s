@@ -4,18 +4,18 @@ section .data
 
 section .text
 	global _expand_key128
-	global _encrypt_128
-	global _decrypt_128
+	global _ft_encrypt
+	global _ft_decrypt
 
 
 ;##############################################################################
 ;############################### EXPAND KEY ###################################
-_expand_key128:
+_expand_key:
 	aeskeygenassist xmm2, xmm1, 0x0
 	call key_expansion_128
 	dec rcx
 	CMP rcx, 0x0
-	ja _expand_key128
+	ja _expand_key
 	ret
 
 key_expansion_128:
@@ -30,16 +30,17 @@ key_expansion_128:
 	movdqu [rel rdi], xmm1
 	add rdi, 0x10
 	ret
-;##############################################################################
-;##############################################################################
 
-_encrypt_128: ; ###### void encrypt_128(void *data, uint8_t *ctx_key) ######
+;##############################################################################
+;############################### FT_ENCRYPT ###################################
+
+_ft_encrypt: ; ###### void ft_encrypt(void *src, uint8_t *ctx_key) ######
 	XCHG rsi, rdi
 	lea rdi, [rel Key_Schedule]
 	movdqu [rel rdi], xmm1
 	add rdi, 0x10
 	mov rcx, 10				;;;;;; ###### Compteur boucle [EXPAND KEY ] #######
-	call _expand_key128
+	call _expand_key
 	movdqu xmm15, [rel rsi]
 	pxor xmm15, [rdi]
 	aesenc xmm15, [rdi+0x10]
@@ -52,16 +53,19 @@ _encrypt_128: ; ###### void encrypt_128(void *data, uint8_t *ctx_key) ######
 	aesenc xmm15, [rdi+0x80]
 	aesenc xmm15, [rdi+0x90]
 	aesenclast xmm15, [rdi+0xa0]
-	movdqu [rel rsi], xmm15
+	movdqu [rsi], xmm15
 	ret
 
-_decrypt_128: ; void decrypt_128(void *block, uint8_t *ctx);
+;##############################################################################
+;############################### FT_DECRYPT ###################################
+
+_ft_decrypt: ; void ft_decrypt(void *src, uint8_t *ctx);
 	XCHG rsi, rdi
 	lea rdi, [rel Key_Schedule]
 	movdqu [rel rdi], xmm1
 	add rdi, 0x10
 	mov rcx, 10
-	call _expand_key128
+	call _expand_key
 	movdqu xmm15, [rel rsi]
 	pxor xmm15, [rdi+0xa0]
 	aesimc xmm9, [rdi+0x90]
@@ -83,6 +87,5 @@ _decrypt_128: ; void decrypt_128(void *block, uint8_t *ctx);
 	aesimc xmm1, [rdi+0x10]
 	aesdec xmm15, xmm1
 	aesdeclast xmm15, [rdi]
-	movdqu [rel rsi], xmm15
+	movdqu [rsi], xmm15
 	ret
-

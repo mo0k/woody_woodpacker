@@ -11,17 +11,15 @@ struct key128_ctx {
 };
 
 void expand_key128(struct key128_ctx *ctx, uint8_t *key);
-void encrypt_128(void *block, uint8_t *key); //ecrypt 128bits
-void decrypt_128(void *block, uint8_t *key); //decrypt 128bits
-void aes_encrypt(void* data, size_t len, uint8_t *key);
-void aes_decrypt(void* data, size_t len, uint8_t *key);
+void ft_encrypt(void *src, uint8_t *key); //ecrypt 128bits
+void ft_decrypt(void *src, uint8_t *key); //decrypt 128bits
 
 int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open);
 
 
 int main(int ac, char **av)
 {
-	unsigned char str[] = "Hello world !!!, ceci est un essai pour controler le bon fonctionnement de l'algorythme aes";
+	unsigned char str[150] = "Romain CARETTE";
 
 	uint8_t key[16] = {0x3c,0x4f,0xcf,0x09,0x88
 						,0x15,0xf7,0xab,0xa6,0xd2,
@@ -46,16 +44,16 @@ int main(int ac, char **av)
 	 *	FONCTIONNE
 	 */
 
-	encrypt_128(str, key);
+	ft_encrypt(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
 	
-	decrypt_128(str, key);
+	ft_decrypt(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
 }
 
-void aes_encrypt(void* data, size_t len, uint8_t *key)
+/*void aes_encrypt(void* data, size_t len, uint8_t *key)
 {
 	int i= -1;
 	printf("\n\e[91mAES ENCRYPT _start_\e[0m\n");
@@ -119,4 +117,4 @@ int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open)
 	}
 	//P_DEBUG("load file OK\n");
 	return (0);
-}
+}*/
