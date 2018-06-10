@@ -1,5 +1,4 @@
 section .data
-	Key_Tmp db 16
 	Key_Schedule db 16*10
 	Key_Schedule_Decrypt db 16*10
 
@@ -8,39 +7,19 @@ section .text
 	global _encrypt_128
 	global _decrypt_128
 
-_expand_key128: ;void expand_key128(uint8_t *key);
 
-		;movdqu Key_Tmp, [rel rdi] 			;save key
-		;movdqu xmm1, [rel Key_Tmp]		;place key dans xmm1
-		;movdqu xmm1, [rel rdi]		;place key dans xmm1
-	lea rdi, [rel Key_Schedule] 			;place tab_key dans rdi
-		;movdqu xmm1, [rel rsi]
-	movdqu [rel rdi], xmm1 			
-	add rdi, 0x10
-	aeskeygenassist xmm2, xmm1, 0x1
+;##############################################################################
+;############################### EXPAND KEY ###################################
+_expand_key128:
+	aeskeygenassist xmm2, xmm1, 0x0
 	call key_expansion_128
-	aeskeygenassist xmm2, xmm1, 0x2
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x4 
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x8 
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x10 
-	call key_expansion_128
-	aeskeygenassist xmm2, xmm1, 0x20 
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x40
-	call key_expansion_128
-	aeskeygenassist xmm2, xmm1, 0x80 
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x1b 
-	call key_expansion_128 
-	aeskeygenassist xmm2, xmm1, 0x36
-	call key_expansion_128
+	dec rcx
+	CMP rcx, 0x0
+	ja _expand_key128
 	ret
 
 key_expansion_128:
-	pshufd xmm2, xmm2, 0xff
+	pshufd xmm2, xmm2, 0xFF
 	vpslldq xmm3, xmm1, 0x4
 	pxor xmm1, xmm3
 	vpslldq xmm3, xmm1, 0x4
@@ -51,72 +30,59 @@ key_expansion_128:
 	movdqu [rel rdi], xmm1
 	add rdi, 0x10
 	ret
+;##############################################################################
+;##############################################################################
 
-_set_keys:
-	movdqu xmm0, [rel rdi]
-	movdqu xmm1, [rel rdi + 0x10]
-	movdqu xmm2, [rel rdi + 0x20]
-	movdqu xmm3, [rel rdi + 0x30]
-	movdqu xmm4, [rel rdi + 0x40]
-	movdqu xmm5, [rel rdi + 0x50]
-	movdqu xmm6, [rel rdi + 0x60]
-	movdqu xmm7, [rel rdi + 0x70]
-	movdqu xmm8, [rel rdi + 0x80]
-	movdqu xmm9, [rel rdi + 0x90]
-	movdqu xmm10, [rel rdi + 0xa0]
-	ret
-
-_encrypt_128: ;void encrypt_128(void *block, uint8_t *ctx_key)
-
-	xchg rsi, rdi
-	;comparer le contenu de rdi (ct_key) et Key_Tmp
-	;je apres _expand_key128
+_encrypt_128: ; ###### void encrypt_128(void *data, uint8_t *ctx_key) ######
+	XCHG rsi, rdi
+	lea rdi, [rel Key_Schedule]
+	movdqu [rel rdi], xmm1
+	add rdi, 0x10
+	mov rcx, 10				;;;;;; ###### Compteur boucle [EXPAND KEY ] #######
 	call _expand_key128
-	call _set_keys
 	movdqu xmm15, [rel rsi]
-	pxor xmm15, xmm0
-	aesenc xmm15, xmm1
-	aesenc xmm15, xmm2
-	aesenc xmm15, xmm3
-	aesenc xmm15, xmm4
-	aesenc xmm15, xmm5
-	aesenc xmm15, xmm6
-	aesenc xmm15, xmm7
-	aesenc xmm15, xmm8
-	aesenc xmm15, xmm9
-	aesenclast xmm15, xmm10
+	pxor xmm15, [rdi]
+	aesenc xmm15, [rdi+0x10]
+	aesenc xmm15, [rdi+0x20]
+	aesenc xmm15, [rdi+0x30]
+	aesenc xmm15, [rdi+0x40]
+	aesenc xmm15, [rdi+0x50]
+	aesenc xmm15, [rdi+0x60]
+	aesenc xmm15, [rdi+0x70]
+	aesenc xmm15, [rdi+0x80]
+	aesenc xmm15, [rdi+0x90]
+	aesenclast xmm15, [rdi+0xa0]
 	movdqu [rel rsi], xmm15
 	ret
 
 _decrypt_128: ; void decrypt_128(void *block, uint8_t *ctx);
-	
-	xchg rsi, rdi
-	;comparer le contenu de rdi (ct_key) et Key_Tmp
-	;je apres _expand_key128
+	XCHG rsi, rdi
+	lea rdi, [rel Key_Schedule]
+	movdqu [rel rdi], xmm1
+	add rdi, 0x10
+	mov rcx, 10
 	call _expand_key128
-	;call key_decrypt_expansion_128
-	call _set_keys
 	movdqu xmm15, [rel rsi]
-	pxor xmm15, xmm10
-	aesimc xmm9, xmm9
+	pxor xmm15, [rdi+0xa0]
+	aesimc xmm9, [rdi+0x90]
 	aesdec xmm15, xmm9
-	aesimc xmm8, xmm8
+	aesimc xmm8, [rdi+0x80]
 	aesdec xmm15, xmm8
-	aesimc xmm7, xmm7
+	aesimc xmm7, [rdi+0x70]
 	aesdec xmm15, xmm7
-	aesimc xmm6, xmm6
+	aesimc xmm6, [rdi+0x60]
 	aesdec xmm15, xmm6
-	aesimc xmm5, xmm5
+	aesimc xmm5, [rdi+0x50]
 	aesdec xmm15, xmm5
-	aesimc xmm4, xmm4
+	aesimc xmm4, [rdi+0x40]
 	aesdec xmm15, xmm4
-	aesimc xmm3, xmm3
+	aesimc xmm3, [rdi+0x30]
 	aesdec xmm15, xmm3
-	aesimc xmm2, xmm2
+	aesimc xmm2, [rdi+0x20]
 	aesdec xmm15, xmm2
-	aesimc xmm1, xmm1
+	aesimc xmm1, [rdi+0x10]
 	aesdec xmm15, xmm1
-	aesdeclast xmm15, xmm0
+	aesdeclast xmm15, [rdi]
 	movdqu [rel rsi], xmm15
 	ret
 

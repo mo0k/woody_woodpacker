@@ -26,7 +26,7 @@ int main(int ac, char **av)
 	uint8_t key[16] = {0x3c,0x4f,0xcf,0x09,0x88
 						,0x15,0xf7,0xab,0xa6,0xd2,
 						0xae,0x28,0x16,0x15,0x7e,0x2b};
-	int len_data = strlen((char*)str);
+	/*int len_data = strlen((char*)str);
 	aes_encrypt(str,len_data, (uint8_t*)&key);
 	write(1, str, len_data);
 	aes_decrypt(str,len_data, (uint8_t*)&key);
@@ -40,25 +40,19 @@ int main(int ac, char **av)
 
 	aes_decrypt(ptr, size, (uint8_t*)&key);
 	write(1, ptr, size);
-	munmap(ptr, size);
+	munmap(ptr, size);*/
 	
 	/*
 	 *	FONCTIONNE
 	 */
-	/*
+
+	encrypt_128(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
 	
-	expand_key128(&ctx, (uint8_t*)&key);
-	
-	encrypt_128(str, &ctx);
+	decrypt_128(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
-	
-	decrypt_128(str, &ctx);
-	write(1, str, 16);
-	write(1, "\n", 1);
-	*/
 }
 
 void aes_encrypt(void* data, size_t len, uint8_t *key)
