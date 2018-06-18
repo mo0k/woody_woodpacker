@@ -34,26 +34,43 @@ key_expansion_128:
 ;##############################################################################
 ;############################### FT_ENCRYPT ###################################
 
-_ft_encrypt: ; ###### void ft_encrypt(void *src, uint8_t *ctx_key) ######
+_ft_encrypt: ; ###### void ft_encrypt(void *src, void *key) ######
 	XCHG rsi, rdi
+	movdqu xmm1, [rdi]
 	lea rdi, [rel Key_Schedule]
-	movdqu [rel rdi], xmm1
+	movdqu [rdi], xmm1
 	add rdi, 0x10
-	mov rcx, 10				;;;;;; ###### Compteur boucle [EXPAND KEY ] #######
+	mov rcx, 0x10
 	call _expand_key
-	movdqu xmm15, [rel rsi]
-	pxor xmm15, [rdi]
-	aesenc xmm15, [rdi+0x10]
-	aesenc xmm15, [rdi+0x20]
-	aesenc xmm15, [rdi+0x30]
-	aesenc xmm15, [rdi+0x40]
-	aesenc xmm15, [rdi+0x50]
-	aesenc xmm15, [rdi+0x60]
-	aesenc xmm15, [rdi+0x70]
-	aesenc xmm15, [rdi+0x80]
-	aesenc xmm15, [rdi+0x90]
-	aesenclast xmm15, [rdi+0xa0]
+	call _set_xmm
+	movdqu xmm15, [rsi]
+	pxor xmm15, 	  xmm0
+	aesenc xmm15,     xmm1
+	aesenc xmm15,     xmm2
+	aesenc xmm15,     xmm3
+	aesenc xmm15,     xmm4
+	aesenc xmm15,     xmm5
+	aesenc xmm15,     xmm6
+	aesenc xmm15,     xmm7
+	aesenc xmm15,     xmm8
+	aesenc xmm15,     xmm9
+	aesenclast xmm15, xmm10
 	movdqu [rsi], xmm15
+	ret
+
+_set_xmm:
+	lea rdi, [rel Key_Schedule]
+	movdqu xmm0, [rdi]
+	movdqu xmm1, [rdi+0x10]
+	movdqu xmm2, [rdi+0x20]
+	movdqu xmm3, [rdi+0x30]
+	movdqu xmm4, [rdi+0x40]
+	movdqu xmm5, [rdi+0x50]
+	movdqu xmm6, [rdi+0x60]
+	movdqu xmm7, [rdi+0x70]
+	movdqu xmm8, [rdi+0x80]
+	movdqu xmm9, [rdi+0x90]
+	movdqu xmm10, [rdi+0xa0]
 	ret
 
 ;##############################################################################
@@ -61,31 +78,35 @@ _ft_encrypt: ; ###### void ft_encrypt(void *src, uint8_t *ctx_key) ######
 
 _ft_decrypt: ; void ft_decrypt(void *src, uint8_t *ctx);
 	XCHG rsi, rdi
+	movdqu xmm1, [rdi]
 	lea rdi, [rel Key_Schedule]
-	movdqu [rel rdi], xmm1
+	movdqu [rdi], xmm1
 	add rdi, 0x10
 	mov rcx, 10
 	call _expand_key
+	call _set_xmm
 	movdqu xmm15, [rel rsi]
-	pxor xmm15, [rdi+0xa0]
-	aesimc xmm9, [rdi+0x90]
+	pxor xmm15, xmm10
+	aesimc xmm9, xmm9
 	aesdec xmm15, xmm9
-	aesimc xmm8, [rdi+0x80]
+	aesimc xmm8, xmm8
 	aesdec xmm15, xmm8
-	aesimc xmm7, [rdi+0x70]
+	aesimc xmm7, xmm7
 	aesdec xmm15, xmm7
-	aesimc xmm6, [rdi+0x60]
+	aesimc xmm6, xmm6
 	aesdec xmm15, xmm6
-	aesimc xmm5, [rdi+0x50]
+	aesimc xmm5, xmm5
 	aesdec xmm15, xmm5
-	aesimc xmm4, [rdi+0x40]
+	aesimc xmm4, xmm4
 	aesdec xmm15, xmm4
-	aesimc xmm3, [rdi+0x30]
+	aesimc xmm3, xmm3
 	aesdec xmm15, xmm3
-	aesimc xmm2, [rdi+0x20]
+	aesimc xmm2, xmm2
 	aesdec xmm15, xmm2
-	aesimc xmm1, [rdi+0x10]
+	aesimc xmm1, xmm1
 	aesdec xmm15, xmm1
-	aesdeclast xmm15, [rdi]
+	aesdeclast xmm15, xmm0
 	movdqu [rsi], xmm15
 	ret
+_k:
+	toto dq _k - _ft_decrypt

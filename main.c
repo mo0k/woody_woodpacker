@@ -6,12 +6,13 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+extern uint64_t toto;
 struct key128_ctx {
         uint8_t key[11][16];
 };
 
 void expand_key128(struct key128_ctx *ctx, uint8_t *key);
-void ft_encrypt(void *src, uint8_t *key); //ecrypt 128bits
+void ft_encrypt(void *src, void *key); //ecrypt 128bits
 void ft_decrypt(void *src, uint8_t *key); //decrypt 128bits
 
 int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open);
@@ -19,11 +20,10 @@ int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open);
 
 int main(int ac, char **av)
 {
-	unsigned char str[150] = "Romain CARETTE";
-
-	uint8_t key[16] = {0x3c,0x4f,0xcf,0x09,0x88
-						,0x15,0xf7,0xab,0xa6,0xd2,
-						0xae,0x28,0x16,0x15,0x7e,0x2b};
+	//write(fd, &ft_decrypt, toto);
+	unsigned char str[350] = "Hello Damien";
+	unsigned char toto[15] = {0};
+	unsigned char key[16] = {0x3c,0x4f,0xcf,0x09,0x88,0x15,0xf7,0xab,0xa6,0xd2,0xae,0x28,0x16,0x15,0x7e,0x2b};
 	/*int len_data = strlen((char*)str);
 	aes_encrypt(str,len_data, (uint8_t*)&key);
 	write(1, str, len_data);
@@ -44,10 +44,11 @@ int main(int ac, char **av)
 	 *	FONCTIONNE
 	 */
 
+	write(1, str, 16);
+	write(1, "\n", 1);
 	ft_encrypt(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
-	
 	ft_decrypt(str, key);
 	write(1, str, 16);
 	write(1, "\n", 1);
