@@ -1,121 +1,404 @@
 #include <stdio.h>
-#include <stdint.h>
-#include <string.h>
-#include <unistd.h>
+#include <elf.h>
 #include <sys/mman.h>
-#include <fcntl.h>
+#include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
 
-extern uint64_t toto;
-struct key128_ctx {
-        uint8_t key[11][16];
-};
+#define MAX_FILE 2
+#define ADD_SIZE(phdr) ((phdr->p_memsz - phdr->p_filesz))
+#define PAGE_SIZE 4096
+#define OPSIZE sizeof(shellcode)-1
+//#define OPSIZE 0
 
-void expand_key128(struct key128_ctx *ctx, uint8_t *key);
-void ft_encrypt(void *src, void *key); //ecrypt 128bits
-void ft_decrypt(void *src, uint8_t *key); //decrypt 128bits
+unsigned char shellcode[] = 
+"\x57\x56\x50\x52\xe8\x0e\x00\x00\x00\x2e\x2e\x2e\x2e\x57\x4f\x4f"
+"\x44\x59\x2e\x2e\x2e\x2e\x0a\x5e\x48\x31\xff\x48\x31\xc0\xb0\x01"
+"\x66\xbf\x01\x00\x48\x31\xd2\xb2\x0e\x0f\x05\x5a\x58\x5e\x5f";
 
-int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open);
+#define SIZE_JMP sizeof(jump) -1
+char jump[] = "\xe9\xff\xff\xff\xff";
+
+#define PADSIZE PAGE_SIZE-(OPSIZE+SIZE_JMP)
+unsigned char padding[PADSIZE];
+
+#define SIZE_INJECT OPSIZE + PADSIZE + SIZE_JMP
 
 
-int main(int ac, char **av)
+typedef struct 
 {
-	//write(fd, &ft_decrypt, toto);
-	unsigned char str[350] = "Hello Damien";
-	unsigned char toto[15] = {0};
-	unsigned char key[16] = {0x3c,0x4f,0xcf,0x09,0x88,0x15,0xf7,0xab,0xa6,0xd2,0xae,0x28,0x16,0x15,0x7e,0x2b};
-	/*int len_data = strlen((char*)str);
-	aes_encrypt(str,len_data, (uint8_t*)&key);
-	write(1, str, len_data);
-	aes_decrypt(str,len_data, (uint8_t*)&key);
-	write(1, str, len_data);
-	
-	printf("FILE ENCRYPT\n");
-	void *ptr;
-	size_t size;
-	open_file(&ptr, &size, "file_test.s", O_RDWR);
-	aes_encrypt(ptr, size, (uint8_t*)&key);
+	void		*addr;
+	size_t		size;
+}				t_map;
 
-	aes_decrypt(ptr, size, (uint8_t*)&key);
-	write(1, ptr, size);
-	munmap(ptr, size);*/
-	
-	/*
-	 *	FONCTIONNE
-	 */
+typedef struct 
+{
+	struct stat	s;
+	int 		fd;
+	t_map		map;
+}				t_file;
 
-	write(1, str, 16);
-	write(1, "\n", 1);
-	ft_encrypt(str, key);
-	write(1, str, 16);
-	write(1, "\n", 1);
-	ft_decrypt(str, key);
-	write(1, str, 16);
-	write(1, "\n", 1);
+typedef struct 
+{
+	int			*fd[MAX_FILE];
+	t_map		*map[MAX_FILE];
+}				t_garbage; 
+
+t_garbage g_garbage_info;
+
+void	set_garbage(t_file *file)
+{
+	static int i = 0;
+
+	g_garbage_info.fd[i] = &file->fd;
+	g_garbage_info.map[i] = &file->map;
+	++i;
 }
 
-/*void aes_encrypt(void* data, size_t len, uint8_t *key)
+int		exit_prog(int ret_value, char *message)
 {
-	int i= -1;
-	printf("\n\e[91mAES ENCRYPT _start_\e[0m\n");
-	size_t				cur;
-
-	cur = 0;
-	while (cur < len)
-	{
-		//printf("boucle:%d => cur:%zd, len:%zd, data+cur:%s\n", ++i, cur, len, data+cur);
-		encrypt_128(data + cur, key);
-		write(1, "\e[91m", strlen("\e[91m"));
-		write(1,data+cur, 16);
-		write(1, "\e[0m", strlen("\e[0m"));
-		cur += 16;
-	}
-	printf("\n\e[91mAES ENCRYPT _end_\e[0m\n");
-}
-
-void aes_decrypt(void* data, size_t len, uint8_t *key)
-{
+	/* loop for munmap all memory */
 	int i = -1;
-	printf("\n\e[92mAES DECRYPT _start_\e[0m\n");
-	size_t				cur;
-
-	cur = 0;
-	while (cur < len)
+	while (g_garbage_info.map[++i] != 0)
 	{
-		//printf("boucle:%d => cur:%zd, len:%zd, data+cur:%s\n", ++i, cur, len, data+cur);
-		decrypt_128(data + cur, key);
-		write(1, "\e[92m", strlen("\e[92m"));
-		write(1,data+cur, 16);
-		write(1, "\e[0m", strlen("\e[0m"));
-		cur += 16;
+		munmap(g_garbage_info.map[i]->addr,
+				g_garbage_info.map[i]->size);
+		g_garbage_info.map[i]->addr = 0;
 	}
-	printf("\n\e[92mAES DECRYPT _end_\e[0m\n");
+	/* loop for close all fd */
+	i = -1;
+	while (g_garbage_info.fd[++i] != 0)
+	{
+		close(*g_garbage_info.fd[i]);
+		g_garbage_info.fd[i] = 0;
+	}
+	if (message)
+		printf("%s", message);
+	exit(ret_value);
 }
 
-
-int 	open_file(void **ptr, size_t *ptr_size, char *filepath, int flag_open)
+void	init_binary(t_file *file, char *path)
 {
-	int				fd;
-	struct stat		buff;
+	memset(file, 0, sizeof(file));
+	set_garbage(file);
 
-	//P_DEBUG_VARGS("filepath:%s\n", filepath);
-	if ((fd = open(filepath, flag_open)) < 0)
+	/* Open file */
+	file->fd = open(path, O_RDONLY);
+	if (file->fd == -1)
+		exit_prog(2, "Error fstat\n");
+	printf("__ Ouverture %s\n", path);
+
+	/* Get stat file */
+	if (fstat(file->fd, &file->s) == -1)
+		exit_prog(3, "Error fstat\n");
+	printf("file size fstat:%zd\n", file->s.st_size);
+	file->map.size = file->s.st_size;
+	printf("__ Stats %s\n", path);
+
+	/* Load file */
+	file->map.addr = mmap(	0, 
+							file->map.size,
+							PROT_READ | PROT_WRITE,
+							MAP_PRIVATE,
+							file->fd,
+							0 );
+	if (file->map.addr == MAP_FAILED)
+		exit_prog(4, "Error mmap\n");
+	printf("__ Chargement en memoire %s\n", path);
+}
+
+void 	print_elf64_hdr(Elf64_Ehdr *elf_hdr)
+{
+	printf("\n __INFO ELF64 HEADER__\n");
+	printf("|\n");
+	printf("| NBR prg_hdr:\t0x%02x\n", elf_hdr->e_phnum);
+	printf("| OFF prg_hdr:\t0x%02x\n", elf_hdr->e_phoff);
+	printf("| NBR sect_hdr:\t0x%02x\n", elf_hdr->e_shnum);
+	printf("| OFF sect_hdr:\t0x%02x\n", elf_hdr->e_shoff);
+	printf("| IDX strtable:\t0x%02x\n", elf_hdr->e_shstrndx);
+	printf("|__\n");
+}
+
+Elf64_Phdr *get_xpload(void *ptr)
+{
+	Elf64_Ehdr	*ehdr;
+	Elf64_Phdr	*phdr;
+	uint16_t 	i;
+
+	ehdr = (Elf64_Ehdr*)ptr;
+	phdr = (Elf64_Phdr*)(ptr + ehdr->e_phoff);
+	i = 0;
+	while(i < ehdr->e_phnum)
 	{
-		//perror(ERROR_STR);
-		return (1);	
+		if (phdr->p_type == PT_LOAD && phdr->p_flags | PF_X)
+			return (phdr);
+		++i;
+		phdr += 1;
 	}
-	if (fstat(fd, &buff) == -1)
-	{
-		//perror(ERROR_STR);
-		return (2);
-	}
-	//check si dossier
-	*ptr_size = buff.st_size;
-	if ((*ptr = mmap(0, *ptr_size, PROT_WRITE | PROT_WRITE, MAP_PRIVATE, fd, 0)) == MAP_FAILED)
-	{
-		//perror(ERROR_STR);
-		return (3);
-	}
-	//P_DEBUG("load file OK\n");
 	return (0);
-}*/
+}
+
+Elf64_Phdr *get_last_pload(void *ptr, uint8_t *flag_bss)
+{
+	Elf64_Ehdr	*ehdr;
+	Elf64_Phdr	*phdr;
+	Elf64_Phdr	*phdr_next;
+	uint16_t 	i;
+
+	ehdr = (Elf64_Ehdr*)ptr;
+	phdr = (Elf64_Phdr*)(ptr + ehdr->e_phoff);
+	i = 0;
+	while(i < ehdr->e_phnum)
+	{
+		if (i != ehdr->e_phnum - 1)
+			phdr_next = phdr + 1;
+		if (phdr->p_type == PT_LOAD && phdr_next->p_type != PT_LOAD)
+		{
+			if (phdr->p_filesz != phdr->p_memsz)
+				*flag_bss = 1;
+			return (phdr);
+		}
+		++i;
+		phdr += 1;
+	}
+	return (0);
+}
+
+Elf64_Shdr *get_bss_shdr(void *ptr)
+{
+	Elf64_Ehdr	*ehdr;
+	Elf64_Shdr	*shdr;
+	uint16_t 	i;
+	char 		*string;
+
+	ehdr = (Elf64_Ehdr*)ptr;
+	shdr = (Elf64_Shdr*)(ptr + ehdr->e_shoff);
+	string = ptr + shdr[ehdr->e_shstrndx].sh_offset;
+	i = 0;
+	while(i < ehdr->e_shnum)
+	{
+		if (!strcmp(".bss", string + shdr->sh_name))
+			return (shdr);
+		++i;
+		shdr += 1;
+	}
+	return (0);
+}
+
+void	add_bss(int fd, size_t bss_size)
+{
+	char	*buff;
+
+	lseek(fd, 0, SEEK_CUR);
+	buff = malloc(bss_size);
+	if (!buff)
+		exit(100);
+	memset(buff, 0, bss_size);
+	write(fd, buff, bss_size);
+	free(buff);
+}
+
+void 	create_binay_packed(t_file *file, void *pload_end, size_t bss_size, uint8_t flag_bss)
+{
+	int		fd;
+
+	fd = open("new", O_RDWR | O_CREAT, 0755);
+	if (fd == -1)
+		exit_prog(1, "open new binary");
+	lseek(fd, 0, SEEK_SET);
+	printf("len:%ld\n", pload_end - file->map.addr);
+	write(fd, file->map.addr, pload_end - file->map.addr);
+	//if (flag_bss)
+	//	add_bss(fd, bss_size);
+
+	lseek(fd, 0, SEEK_CUR);
+	//add opcode
+	//printf("size shellcode:%zd\n", OPCODESZ );
+	write(fd, shellcode, OPSIZE);
+	
+	lseek(fd, 0, SEEK_CUR);
+	write(fd, jump, 5);
+
+	memset(padding, 0, PADSIZE);
+	lseek(fd, 0, SEEK_CUR);
+	write(fd, padding, PADSIZE);
+	
+	lseek(fd, 0, SEEK_CUR);
+	printf("LEN:%d, padding len:%zd, op len:%zd\n", SIZE_INJECT, PADSIZE, OPSIZE);
+	write(fd,
+			pload_end,
+			(file->map.addr + file->map.size) - pload_end);
+	close(fd);
+	printf("fin d'ecriture\n");
+}
+
+void 	set_shstrndx(void *ptr, int new_size)
+{
+	//add bss size in offset of shstrndx section header
+	Elf64_Shdr *shdr;
+	shdr = (Elf64_Shdr*)(ptr + ((Elf64_Ehdr*)(ptr))->e_shoff);
+	shdr[((Elf64_Ehdr*)(ptr))->e_shstrndx].sh_offset += new_size;
+}
+
+void 	set_new_config(void *ptr, Elf64_Phdr *phdr, int bss_size)
+{
+	//modif e_entry;
+	((Elf64_Ehdr*)(ptr))->e_entry = phdr->p_offset + phdr->p_memsz;
+
+	set_shstrndx(ptr, bss_size + SIZE_INJECT);
+
+	//add size in offset of first section header
+	((Elf64_Ehdr*)(ptr))->e_shoff += bss_size + SIZE_INJECT;
+
+	//modif size last PLOAD
+	phdr->p_memsz += SIZE_INJECT;
+	phdr->p_filesz = phdr->p_memsz;
+
+	//add right X
+	phdr->p_flags |= PF_X;
+}
+
+/*
+	Elf64_Ehdr 	*ehdr;
+	Elf64_Phdr 	*phdr;
+	Elf64_Shdr 	*shdr;
+	uint8_t		flag_bss;
+	int 		bss_size;
+	void		*pload_end;
+
+	close(file->fd);
+	ehdr = (Elf64_Ehdr*)(file->map.addr);
+	print_elf64_hdr(ehdr);
+	phdr = get_last_pload(file->map.addr, &flag_bss);
+
+	bss_size = ADD_SIZE(phdr); // +opcode_size
+	
+	pload_end = file->map.addr + phdr->p_offset + phdr->p_filesz;
+	
+	set_new_config(file->map.addr, phdr, bss_size);
+
+	
+
+	printf("PHDR:%p\tbss:%d\n", phdr, flag_bss);
+	create_binay_packed(file, pload_end, bss_size, flag_bss);
+*/
+
+void	set_phdr_offset(Elf64_Phdr *phdr, uint64_t offset, uint16_t phnum)
+{
+	int i;
+	//uint16_t offset;
+
+	//i = (cur_phdr - first_phdr) / sizeof(Elf64_Phdr);
+	//printf("index:%d\n", i);
+	//offset = phdr[i].p_offset;
+	///i += 1;
+	for(i = 0; i < phnum; ++i)
+	{
+		printf("phdr[i].p_offset:0x%x\toffset:0x%x\n", phdr[i].p_offset, offset);
+		if (phdr[i].p_offset > offset)
+		{
+			printf("GOOOOO\n");
+			printf("phdr[i].p_offset:0x%x\n", phdr[i].p_offset);
+			phdr[i].p_offset += SIZE_INJECT;
+			printf("phdr[i].p_offset:0x%x\n", phdr[i].p_offset);
+		}
+	}
+}
+
+void	set_shdr_offset(Elf64_Shdr *shdr, uint64_t offset, uint16_t shnum)
+{
+	int i;
+	//uint16_t offset;
+
+	//i = (cur_phdr - first_phdr) / sizeof(Elf64_Phdr);
+	//printf("index:%d\n", i);
+	//offset = phdr[i].p_offset;
+	///i += 1;
+	for(i = 0; i < shnum; ++i)
+	{
+		printf("shdr[i].s_offset:0x%x\toffset:0x%x\n", shdr[i].sh_offset, offset);
+		if (shdr[i].sh_offset > offset)
+		{
+			printf("shdr[i].p_offset:0x%x\n", shdr[i].sh_offset);
+			shdr[i].sh_offset += SIZE_INJECT;
+			printf("shdr[i].p_offset:0x%x\n", shdr[i].sh_offset);
+		}
+	}
+}
+
+void	wwp_elf64(t_file *file)
+{
+
+	Elf64_Ehdr 	*ehdr;
+	Elf64_Phdr 	*phdr;
+	Elf64_Shdr 	*shdr;
+	void		*split;
+	int 		orign_entry;
+
+	close(file->fd);
+	ehdr = (Elf64_Ehdr*)(file->map.addr);
+
+	//Recupere prog header avec les droit execution
+	phdr = get_xpload(file->map.addr);
+	printf("phdr:%p\n", phdr);
+	if (phdr)
+	{
+		//uint64_t tmp_offset;
+		//tmp_offset = (phdr + 1)->p_offset;
+		printf("HEOOOOOO\n");
+		orign_entry = ehdr->e_entry;
+		ehdr->e_entry = phdr->p_offset + phdr->p_filesz;
+		int jmp_addr;
+		//jmp_addr = orign_entry - (ehdr->e_entry + SIZE_INJECT);
+		jmp_addr = orign_entry - (ehdr->e_entry + OPSIZE + SIZE_JMP);
+		memmove(jump + 1, &jmp_addr, sizeof(int));
+		// Sauvegarde du pointeur de fin du segment PLOAD 
+		printf("p_offset:%d\n", (phdr + 1)->p_offset);
+		split = file->map.addr + phdr->p_offset + phdr->p_filesz;
+
+		set_phdr_offset(file->map.addr + ehdr->e_phoff,
+						phdr->p_offset + phdr->p_memsz,
+						ehdr->e_phnum);
+		set_shdr_offset(file->map.addr + ehdr->e_shoff,
+						phdr->p_offset + phdr->p_memsz,
+						ehdr->e_shnum);
+		printf("avant ehdr->e_shoff:0x%x\n",ehdr->e_shoff);
+		ehdr->e_shoff += SIZE_INJECT;
+		printf("apres ehdr->e_shoff:0x%x\n",ehdr->e_shoff);
+		//phdr->p_memsz = tmp_offset;
+		//printf("phdr->p_memsz:0x%x\n", phdr->p_memsz);
+		phdr->p_memsz += SIZE_INJECT;
+		//printf("phdr->p_memsz:0x%x\n", phdr->p_memsz);
+		phdr->p_filesz += SIZE_INJECT;
+
+		phdr->p_flags |= PF_W;
+
+	}
+	create_binay_packed(file, split, 0, 0);
+}
+
+int		main(int ac, char **av)
+{
+	t_file orign_file;
+	t_file new_file;
+
+	printf("sizeof(Elf64_Shdr):%zd\n", sizeof(Elf64_Shdr));
+	printf("sizeof(Elf64_Phdr):%zd\n", sizeof(Elf64_Phdr));
+	memset(&new_file, 0, sizeof(new_file));
+	memset(&g_garbage_info, 0, sizeof(t_garbage));
+	set_garbage(&new_file);
+
+	/* Check input */
+	if (ac != 2)
+		exit_prog(1, "./wwwp elf_file\n");
+
+	init_binary(&orign_file, av[1]);
+	wwp_elf64(&orign_file);
+
+	exit_prog(0, 0);
+
+	return (0);
+}
