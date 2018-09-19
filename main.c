@@ -14,17 +14,18 @@
 #define OPSIZE sizeof(shellcode)-1
 //#define OPSIZE 0
 
-unsigned char shellcode[] =  //print WOODY
+unsigned char shellcode1[] =  //print WOODY
 "\x57\x56\x50\x52\xe8\x0e\x00\x00\x00\x2e\x2e\x2e\x2e\x57\x4f\x4f"
 "\x44\x59\x2e\x2e\x2e\x2e\x0a\x5e\x48\x31\xff\x48\x31\xc0\xb0\x01"
 "\x66\xbf\x01\x00\x48\x31\xd2\xb2\x0e\x0f\x05\x5a\x58\x5e\x5f";
-
+unsigned char shellcode[] =  
+"\x57\x4f\x4f\x44\x59\x0a\x57\x56\x52\x50\xbf\x01\x00\x00\x00\x48\x8d\x35\xea\xff\xff\xff\xba\x06\x00\x00\x00\xb8\x01\x00\x00\x00\x0f\x05\x58\x5a\x5e\x5f";
 #define SIZE_JMP sizeof(jump) -1
 char jump[] = "\xe9\xff\xff\xff\xff";
 
 #define PADSIZE PAGE_SIZE-(OPSIZE+SIZE_JMP)
 unsigned char padding[PADSIZE];
-
+#define SIZE_WOODY 6
 #define SIZE_INJECT OPSIZE + PADSIZE + SIZE_JMP
 
 
@@ -132,7 +133,9 @@ Elf64_Phdr *get_xpload(void *ptr)
 	i = 0;
 	while(i < ehdr->e_phnum)
 	{
-		if (phdr->p_type == PT_LOAD && phdr->p_flags | PF_X)
+		if (phdr->p_type == PT_LOAD)
+			printf("PLOAD\n");
+		if (phdr->p_type == PT_LOAD && phdr->p_flags & PF_X)
 			return (phdr);
 		++i;
 		phdr += 1;
@@ -173,15 +176,27 @@ void 	create_binay_packed(t_file *file, void *pload_end)
 	fd = open("new", O_RDWR | O_CREAT, 0755);
 	if (fd == -1)
 		exit_prog(1, "open new binary");
-	lseek(fd, 0, SEEK_SET);
-	printf("len:%ld\n", pload_end - file->map.addr);
-	write(fd, file->map.addr, pload_end - file->map.addr);
+	//lseek(fd, 0, SEEK_SET);
+	printf("1 partie len:%ld\n", pload_end - file->map.addr);
+	printf("2 partie len:%ld\n", (file->map.addr + file->map.size) - (pload_end + OPSIZE + SIZE_JMP));
+	printf("OPSIZE:%ld JUMP:%ld\n", OPSIZE, 5);
+	printf("total file en:%ld\n", file->map.addr + file->map.size - file->map.addr);
+	write(fd, file->map.addr, pload_end - file->map.addr );
+	printf("ecriture de la premier partie\n");
+
 	write(fd, shellcode, OPSIZE);
-	write(fd, jump, 5);
-	memset(padding, 0, PADSIZE);
-	write(fd, padding, PADSIZE);
+	//lseek(fd, -11, SEEK_CUR);
+	//fseek(fd, 0 , SEEK_);
+	write(fd, jump, SIZE_JMP);
+	//lseek(fd, SIZE_WOODY, SEEK_CUR);
+	printf("ecriture de la derniere partie\n");
+	//memset(padding, 0, PADSIZE);
+	//write(fd, padding, PADSIZE);
+	//printf("OPSIZE:%zd\n",OPSIZE );
+//	printf("PADSIZE:%zd\n",PADSIZE );
+
 	printf("__    LEN:%d, padding len:%zd, op len:%zd\n", SIZE_INJECT, PADSIZE, OPSIZE);
-	write(fd, pload_end, (file->map.addr + file->map.size) - pload_end);
+	write(fd, pload_end  + OPSIZE + SIZE_JMP, (file->map.addr + file->map.size) - (pload_end + OPSIZE + SIZE_JMP));
 	close(fd);
 	printf("__ Binaire '%s' creer\n", "new");
 }
@@ -194,19 +209,29 @@ void	set_phdr_offset(Elf64_Phdr *phdr, uint64_t offset, uint16_t phnum)
 	for(i = 0; i < phnum; ++i)
 	{
 		if (phdr[i].p_offset > offset)
+		{
 			phdr[i].p_offset += SIZE_INJECT;
+			//phdr[i].p_vaddr -= SIZE_INJECT;
+			//phdr[i].p_paddr -= SIZE_INJECT;
+
+		}
+
 	}
 }
 
 void	set_shdr_offset(Elf64_Shdr *shdr, uint64_t offset, uint16_t shnum)
 {
+
 	int i;
 
 	printf("__ Modification des entetes de section\n");
 	for(i = 0; i < shnum; ++i)
 	{
 		if (shdr[i].sh_offset > offset)
+		{
 			shdr[i].sh_offset += SIZE_INJECT;
+			//shdr[i].sh_addr += SIZE_INJECT;
+		}
 	}
 }
 
@@ -229,16 +254,19 @@ void	wwp_elf64(t_file *file)
 	if (phdr)
 	{
 		orign_entry = ehdr->e_entry;
-		ehdr->e_entry = phdr->p_offset + phdr->p_filesz;
-		jmp_addr = orign_entry - (ehdr->e_entry + OPSIZE + SIZE_JMP);
+		//ehdr->e_entry = phdr->p_vaddr + phdr->p_filesz ;
+		ehdr->e_entry = phdr->p_vaddr + phdr->p_filesz  + SIZE_WOODY;
+		//jmp_addr = orign_entry - (ehdr->e_entry + (OPSIZE - SIZE_WOODY))  ;
+		jmp_addr = orign_entry - (ehdr->e_entry + (OPSIZE + SIZE_JMP - SIZE_WOODY))  ;
 		memmove(jump + 1, &jmp_addr, sizeof(int));
 
 		// Sauvegarde du pointeur de fin du segment PLOAD 
 		printf("p_offset:%d\n", (phdr + 1)->p_offset);
 		split = file->map.addr + phdr->p_offset + phdr->p_filesz;
+		//split = file->map.addr + (phdr + 1)->p_offset;
 
 		//fix new values
-		set_phdr_offset(file->map.addr + ehdr->e_phoff,
+		/*set_phdr_offset(file->map.addr + ehdr->e_phoff,
 						phdr->p_offset + phdr->p_memsz,
 						ehdr->e_phnum);
 		set_shdr_offset(file->map.addr + ehdr->e_shoff,
@@ -246,8 +274,9 @@ void	wwp_elf64(t_file *file)
 						ehdr->e_shnum);
 		ehdr->e_shoff += SIZE_INJECT;
 		phdr->p_memsz += SIZE_INJECT;
-		phdr->p_filesz += SIZE_INJECT;
-		phdr->p_flags |= PF_W;
+		phdr->p_filesz += SIZE_INJECT;*/
+		//phdr->p_flags |= PF_W;
+		//phdr->p_flags |= PF_X;
 	}
 	create_binay_packed(file, split);
 }
