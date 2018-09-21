@@ -20,14 +20,23 @@ unsigned char shellcode1[] =  //print WOODY
 "\x66\xbf\x01\x00\x48\x31\xd2\xb2\x0e\x0f\x05\x5a\x58\x5e\x5f";
 unsigned char shellcode[] =  
 "\x57\x4f\x4f\x44\x59\x0a\x57\x56\x52\x50\xbf\x01\x00\x00\x00\x48\x8d\x35\xea\xff\xff\xff\xba\x06\x00\x00\x00\xb8\x01\x00\x00\x00\x0f\x05\x58\x5a\x5e\x5f";
-#define SIZE_JMP sizeof(jump) -1
 char jump[] = "\xe9\xff\xff\xff\xff";
+
+
+#define SIZE_JMP sizeof(jump) -1
+#define SIZE_WOODY 6
+#define SIZE_INJECT OPSIZE + SIZE_JMP
 
 #define PADSIZE PAGE_SIZE-(OPSIZE+SIZE_JMP)
 unsigned char padding[PADSIZE];
-#define SIZE_WOODY 6
-#define SIZE_INJECT OPSIZE + PADSIZE + SIZE_JMP
 
+
+#define NB_FILE 2
+enum e_file
+{
+	ORIGN,
+	PACKED
+};
 
 typedef struct 
 {
@@ -39,24 +48,35 @@ typedef struct
 {
 	struct stat	s;
 	int 		fd;
+	char 	*name;
 	t_map		map;
 }				t_file;
 
+typedef struct
+{
+	char **name1;
+}		t_name;
+
 typedef struct 
 {
+	t_map		map[MAX_FILE];
+	t_name	name[MAX_FILE];
 	int			*fd[MAX_FILE];
-	t_map		*map[MAX_FILE];
 }				t_garbage; 
 
 t_garbage g_garbage_info;
 
-void	set_garbage(t_file *file)
+void	set_garbage(enum e_file type ,t_file *file)
 {
-	static int i = 0;
+	//static int i = 0;
+	printf("set_garbage\n");
+	g_garbage_info.fd[type] = &file->fd;
+	g_garbage_info.map[type] = file->map;
+	g_garbage_info.name[type].name1 = &file->name;
+	printf("g_garbage_info.map[%s]->addr:%p\n",type ? "PACKED" : "ORIGN" , g_garbage_info.map[type].addr);
+	printf("g_garbage_info.map[%s]:%p\n",type ? "PACKED" : "ORIGN" , &g_garbage_info.map[type]);
 
-	g_garbage_info.fd[i] = &file->fd;
-	g_garbage_info.map[i] = &file->map;
-	++i;
+	//++i;
 }
 
 int		exit_prog(int ret_value, char *message)
@@ -65,17 +85,24 @@ int		exit_prog(int ret_value, char *message)
 	int i = -1;
 	while (++i < MAX_FILE)
 	{
-		munmap(g_garbage_info.map[i]->addr,
-				g_garbage_info.map[i]->size);
-		g_garbage_info.map[i]->addr = 0;
+		if (g_garbage_info.map[i].addr != 0)
+		{
+			munmap(g_garbage_info.map[i].addr, g_garbage_info.map[i].size);
+			g_garbage_info.map[i].addr = 0;
+		}
 	}
 	/* loop for close all fd */
 	i = -1;
 	while (++i < MAX_FILE)
 	{
-		close(*g_garbage_info.fd[i]);
-		g_garbage_info.fd[i] = 0;
+		if (*g_garbage_info.fd[i] > 0)
+		{
+			close(*g_garbage_info.fd[i]);
+			*g_garbage_info.fd[i] = 0;
+		}
 	}
+	free(*g_garbage_info.name[PACKED].name1);
+	*g_garbage_info.name[PACKED].name1 = 0;
 	if (message)
 		printf("%s", message);
 	exit(ret_value);
@@ -83,9 +110,6 @@ int		exit_prog(int ret_value, char *message)
 
 void	init_binary(t_file *file, char *path)
 {
-	memset(file, 0, sizeof(file));
-	set_garbage(file);
-
 	/* Open file */
 	file->fd = open(path, O_RDONLY);
 	if (file->fd == -1)
@@ -108,6 +132,8 @@ void	init_binary(t_file *file, char *path)
 	if (file->map.addr == MAP_FAILED)
 		exit_prog(4, "Error mmap\n");
 	printf("__ Chargement en memoire %s\n", path);
+	file->name = path;
+
 }
 
 void 	print_elf64_hdr(Elf64_Ehdr *elf_hdr)
@@ -115,9 +141,9 @@ void 	print_elf64_hdr(Elf64_Ehdr *elf_hdr)
 	printf("\n __INFO ELF64 HEADER__\n");
 	printf("|\n");
 	printf("| NBR prg_hdr:\t0x%02x\n", elf_hdr->e_phnum);
-	printf("| OFF prg_hdr:\t0x%02x\n", elf_hdr->e_phoff);
+	printf("| OFF prg_hdr:\t0x%02lx\n", elf_hdr->e_phoff);
 	printf("| NBR sect_hdr:\t0x%02x\n", elf_hdr->e_shnum);
-	printf("| OFF sect_hdr:\t0x%02x\n", elf_hdr->e_shoff);
+	printf("| OFF sect_hdr:\t0x%02lx\n", elf_hdr->e_shoff);
 	printf("| IDX strtable:\t0x%02x\n", elf_hdr->e_shstrndx);
 	printf("|__\n");
 }
@@ -133,8 +159,8 @@ Elf64_Phdr *get_xpload(void *ptr)
 	i = 0;
 	while(i < ehdr->e_phnum)
 	{
-		if (phdr->p_type == PT_LOAD)
-			printf("PLOAD\n");
+		//if (phdr->p_type == PT_LOAD)
+			//printf("PLOAD\n");
 		if (phdr->p_type == PT_LOAD && phdr->p_flags & PF_X)
 			return (phdr);
 		++i;
@@ -169,36 +195,59 @@ Elf64_Phdr *get_last_pload(void *ptr, uint8_t *flag_bss)
 	return (0);
 }
 
-void 	create_binay_packed(t_file *file, void *pload_end)
+static void		inject_in_ploadx(int fd, t_file *file, void *pload_end)
 {
-	int		fd;
-
-	fd = open("new", O_RDWR | O_CREAT, 0755);
-	if (fd == -1)
-		exit_prog(1, "open new binary");
-	//lseek(fd, 0, SEEK_SET);
-	printf("1 partie len:%ld\n", pload_end - file->map.addr);
-	printf("2 partie len:%ld\n", (file->map.addr + file->map.size) - (pload_end + OPSIZE + SIZE_JMP));
-	printf("OPSIZE:%ld JUMP:%ld\n", OPSIZE, 5);
-	printf("total file en:%ld\n", file->map.addr + file->map.size - file->map.addr);
+	printf("__ Ecriture de la premier partie\n");
 	write(fd, file->map.addr, pload_end - file->map.addr );
-	printf("ecriture de la premier partie\n");
-
+	printf("__ Ecriture du shellcode\n");
 	write(fd, shellcode, OPSIZE);
-	//lseek(fd, -11, SEEK_CUR);
-	//fseek(fd, 0 , SEEK_);
+	printf("__ Ecriture du jump\n");
 	write(fd, jump, SIZE_JMP);
-	//lseek(fd, SIZE_WOODY, SEEK_CUR);
-	printf("ecriture de la derniere partie\n");
-	//memset(padding, 0, PADSIZE);
-	//write(fd, padding, PADSIZE);
-	//printf("OPSIZE:%zd\n",OPSIZE );
-//	printf("PADSIZE:%zd\n",PADSIZE );
-
-	printf("__    LEN:%d, padding len:%zd, op len:%zd\n", SIZE_INJECT, PADSIZE, OPSIZE);
+	printf("__ Ecriture de la derniere partie\n");
 	write(fd, pload_end  + OPSIZE + SIZE_JMP, (file->map.addr + file->map.size) - (pload_end + OPSIZE + SIZE_JMP));
-	close(fd);
-	printf("__ Binaire '%s' creer\n", "new");
+	printf("file[PACKED].addr:%p\n",file[PACKED].map.addr);
+
+}
+
+char 	*get_name_packed(t_file *file)
+{
+	static char 	*addname = "_packed";
+	char 	*buf;
+	char 	*ptr;
+
+	ptr = strrchr(file->name, '/');
+	ptr = (ptr == NULL) ? file->name : ptr + 1;
+	buf = (char*)malloc((ptr ? strlen(ptr)  : 0) + strlen(addname) + 1);
+	strcpy(buf, ptr ? ptr : "");
+	strcat(buf, addname);
+	return (buf);
+}
+
+void 	create_binay_packed(t_file *file, void *pload_end, void *flag_in_ploadx)
+{
+	file[PACKED].name = get_name_packed(&file[ORIGN]);
+	printf("file[PACKED].name:%s\n",file[PACKED].name);
+	printf("file[PACKED].addr:%p\n",file[PACKED].map.addr);
+	printf("g_garbage_info.map[PACKED]->addr:%p\n",g_garbage_info.map[PACKED].addr);
+
+	file[PACKED].fd = open(file[PACKED].name, O_RDWR | O_CREAT, 0755);
+	//free(bin_packed_name);
+	if (file[PACKED].fd == -1)
+		exit_prog(1, "open new binary");
+	if (flag_in_ploadx)
+	{
+		printf("__ Inject between plaod method\n");
+		inject_in_ploadx(file[PACKED].fd, &file[ORIGN], pload_end);
+	}
+	else
+	{
+		printf("__ NO_PACKED\n");
+	}
+	close(file[PACKED].fd);
+	printf("__ Binaire packed\n\n");
+	printf("file[PACKED].addr:%p\n",file[PACKED].map.addr);
+	printf("garbage file[PACKED].addr:%p\n",g_garbage_info.map[PACKED].addr);
+
 }
 
 void	set_phdr_offset(Elf64_Phdr *phdr, uint64_t offset, uint16_t phnum)
@@ -211,11 +260,9 @@ void	set_phdr_offset(Elf64_Phdr *phdr, uint64_t offset, uint16_t phnum)
 		if (phdr[i].p_offset > offset)
 		{
 			phdr[i].p_offset += SIZE_INJECT;
-			//phdr[i].p_vaddr -= SIZE_INJECT;
-			//phdr[i].p_paddr -= SIZE_INJECT;
-
+			//phdr[i].p_vaddr += SIZE_INJECT;
+			//phdr[i].p_paddr += SIZE_INJECT;
 		}
-
 	}
 }
 
@@ -235,35 +282,40 @@ void	set_shdr_offset(Elf64_Shdr *shdr, uint64_t offset, uint16_t shnum)
 	}
 }
 
+Elf64_Phdr	*get_next_pload(Elf64_Phdr *first, Elf64_Phdr *current, uint16_t phnum)
+{
+	int position;
+	position = current - first;
+	if (position < phnum && (current + 1)->p_type == PT_LOAD)
+		return (current + 1);
+	else
+		return (0);
+}
+
 void	wwp_elf64(t_file *file)
 {
 
 	Elf64_Ehdr 	*ehdr;
 	Elf64_Phdr 	*phdr;
+	Elf64_Phdr 	*phdr_next;
 	Elf64_Shdr 	*shdr;
-	void		*split;
-	int 		orign_entry;
-	int 		jmp_addr;
+	void				*split;
+	int 				orign_entry;
+	int 				jmp_addr;
 
-	close(file->fd);
-	ehdr = (Elf64_Ehdr*)(file->map.addr);
+	close(file[ORIGN].fd);
+	file[ORIGN].fd = 0;
 
-	//Recupere prog header avec les droit execution
-	phdr = get_xpload(file->map.addr);
-	printf("phdr:%p\n", phdr);
+	ehdr = (Elf64_Ehdr*)(file[ORIGN].map.addr);
+	phdr = get_xpload(file[ORIGN].map.addr);
 	if (phdr)
 	{
+		phdr_next = get_next_pload(file[ORIGN].map.addr + ehdr->e_phoff,  phdr, ehdr->e_phnum);
 		orign_entry = ehdr->e_entry;
-		//ehdr->e_entry = phdr->p_vaddr + phdr->p_filesz ;
 		ehdr->e_entry = phdr->p_vaddr + phdr->p_filesz  + SIZE_WOODY;
-		//jmp_addr = orign_entry - (ehdr->e_entry + (OPSIZE - SIZE_WOODY))  ;
 		jmp_addr = orign_entry - (ehdr->e_entry + (OPSIZE + SIZE_JMP - SIZE_WOODY))  ;
 		memmove(jump + 1, &jmp_addr, sizeof(int));
-
-		// Sauvegarde du pointeur de fin du segment PLOAD 
-		printf("p_offset:%d\n", (phdr + 1)->p_offset);
-		split = file->map.addr + phdr->p_offset + phdr->p_filesz;
-		//split = file->map.addr + (phdr + 1)->p_offset;
+		split = file[ORIGN].map.addr + phdr->p_offset + phdr->p_filesz;
 
 		//fix new values
 		/*set_phdr_offset(file->map.addr + ehdr->e_phoff,
@@ -278,24 +330,32 @@ void	wwp_elf64(t_file *file)
 		//phdr->p_flags |= PF_W;
 		//phdr->p_flags |= PF_X;
 	}
-	create_binay_packed(file, split);
+	printf("g_garbage_info.map[PACKED]->addr:%p\n",g_garbage_info.map[PACKED].addr);
+
+	create_binay_packed(&file[ORIGN], split, (void*)phdr_next);	
 }
 
 int		main(int ac, char **av)
 {
-	t_file orign_file;
-	t_file new_file;
+	t_file file[NB_FILE];
 
-	memset(&new_file, 0, sizeof(new_file));
+	memset(&file[PACKED], 0, sizeof(t_file));
+	memset(&file[ORIGN], 0, sizeof(t_file));
 	memset(&g_garbage_info, 0, sizeof(t_garbage));
-	set_garbage(&new_file);
+	set_garbage(ORIGN, &file[ORIGN]);
+	set_garbage(PACKED, &file[PACKED]);
+	printf("file[PACKED]:%p\n", &file[PACKED]);
+	printf("file[ORIGN]:%p\n", &file[ORIGN]);
 
 	/* Check input */
 	if (ac != 2)
 		exit_prog(1, "./wwwp elf_file\n");
 
-	init_binary(&orign_file, av[1]);
-	wwp_elf64(&orign_file);
+	printf("file[ORIGN]:%p\n", &file[ORIGN]);
+	init_binary(&file[ORIGN], av[1]);
+	//set_garbage(&orign_file);
+	wwp_elf64(file);
+	printf("file[PACKED].addr:%p\n",g_garbage_info.map[PACKED].addr);
 
 	exit_prog(0, 0);
 
